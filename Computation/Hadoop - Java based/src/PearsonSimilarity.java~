@@ -1,0 +1,430 @@
+//import java.io.BufferedReader;
+import java.io.IOException;
+//import java.io.InputStreamReader;
+import java.net.URI;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.fs.FileUtil;
+import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.io.DoubleWritable;
+//import org.apache.hadoop.io.IntWritable;
+//import org.apache.hadoop.io.NullWritable;
+import org.apache.hadoop.io.Text;
+//import org.apache.hadoop.io.WritableComparable;
+//import org.apache.hadoop.io.WritableComparator;
+import org.apache.hadoop.mapreduce.Job;
+import org.apache.hadoop.mapreduce.Mapper;
+import org.apache.hadoop.mapreduce.Reducer;
+import org.apache.hadoop.mapreduce.lib.input.FileInputFormat;
+import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
+import org.apache.hadoop.util.GenericOptionsParser;
+
+//import com.google.common.collect.Iterables;
+
+public class PearsonSimilarity {
+	
+	public static class CalAvgMapper
+	extends Mapper<Object,// input key
+	Text,  // input value
+	Text,  // output key
+	Text> //output value
+	{
+		public void map(Object key, Text value, Context context)
+				throws IOException, InterruptedException {
+				String parts[] = value.toString().split("\t");
+				String v = parts[2] + "\t" + parts[0];
+//				System.out.println(v);
+//				System.exit(2);
+				context.write(new Text(parts[1]), new Text(v));
+				
+		}
+	}
+
+	public static class CalAvgReducer
+	extends Reducer<Text,Text,Text,Text> {
+		public void reduce(Text key, Iterable<Text> values,
+				Context context
+				) throws IOException, InterruptedException {
+			int n = 0;
+			int sum = 0;
+			double average = 0.0;
+			Iterator<Text> it = values.iterator();
+			List<Text> cache = new ArrayList<Text>();
+//			System.out.println("first"+Iterables.size(values));
+			for (Text val : values){
+				String s = key.toString() + "\t" + val.toString();
+				Text text = new Text(s);
+				cache.add(text);
+				String[] p = val.toString().split("\t");
+				sum += Double.parseDouble(p[0]);
+				n += 1;
+			}
+			
+//			System.out.println(cache.size());
+//			System.out.println(n);
+//			for (int i = 1; i < 100; i++) {
+//				System.out.println(cache.get(i));
+//			}
+			average = (double)sum / n;
+			String avg = String.valueOf(average);
+
+//			System.out.println("terminate");
+//			System.exit(0);
+//			System.out.println(Iterables.size(values));
+//			System.exit(2);
+			
+			for (Text text: cache){
+				String[] parts = text.toString().split("\t");
+				String itemID = parts[0];
+				String ratings = parts[1];
+				String userID = parts[2];
+				String value= itemID + "\t" + ratings + "\t" + avg;
+//				System.out.println(value);
+				context.write(new Text(userID), new Text(value));
+			}
+			
+//			for (Text val : values){
+//
+//				String[] parts = val.toString().split("\t");
+//				String ratings = parts[0];
+//				String userID = parts[1];
+//				String result = key.toString() + "\t" + ratings + "\t" + avg; // key:itemID
+//				context.write(new Text(userID), new Text(result));
+//			}
+
+		}
+
+	}
+
+	public static class UserMapper
+	extends Mapper<Object,// input key
+	Text,  // input value
+	Text,  // output key
+	Text> //output value
+	{
+		public void map(Object key, Text value, Context context)
+				throws IOException, InterruptedException {
+			String[] parts = value.toString().split("\t", 2);
+			context.write(new Text(parts[0]), new Text(parts[1]));
+//			System.out.println(parts[0]);
+		}
+	}
+
+	public static class UserReducer
+	extends Reducer<Text,Text,Text,Text> {
+		public void reduce(Text key, Iterable<Text> values,
+				Context context
+				) throws IOException, InterruptedException {
+			StringBuilder s = new StringBuilder();
+			for (Text val : values){
+				s.append(val.toString() + " ");
+			}
+			// delete the last " "
+			s.deleteCharAt(s.length() - 1);
+			//System.out.println(s);
+			context.write(key, new Text(s.toString()));
+		}
+
+	}
+	
+	public static class CalPearsonMapper
+	extends Mapper<Object,// input key
+	Text,  // input value
+	Text,  // output key
+	Text> //output value
+	{
+		public void map(Object key, Text value, Context context)
+				throws IOException, InterruptedException {
+			String[] s = value.toString().split("\t", 2);
+			String[] p = s[1].split(" ");
+			int i, l = 0;
+			int len = p.length - 1;
+			if (len > 0){// user must have at least 2 ratings
+				for(i = 0; i < len; i++){
+					for(l = i + 1; l <= len-i; l++){
+						String[] parts1 = p[i].split("\t");
+						String[] parts2 = p[l].split("\t");
+						String s11 = parts1[0];//1:itemID 2:ratings 3:average
+						String s12 = parts1[1];
+						String s13 = parts1[2];
+						String s21 = parts2[0];
+						String s22 = parts2[1];
+						String s23 = parts2[2];
+						if (s11.compareTo(s21) > 0){//itemID_1 < itemID_2
+							String tmp1 = s11;
+							String tmp2 = s12;
+							String tmp3 = s13;
+							s11 = s21;
+							s12 = s22;
+							s13 = s23;
+							s21 = tmp1;
+							s22 = tmp2;
+							s23 = tmp3;
+						}
+						context.write(new Text(s11 + " " + s21), new Text(s12 + " " + s22 + "\t" + s13 + " " + s23));
+					}
+				}
+				
+			}
+	
+		}
+	}
+
+	public static class CalPearsonReducer
+	extends Reducer<Text,Text,Text,Text> {
+		public void reduce(Text key, Iterable<Text> values,
+				Context context
+				) throws IOException, InterruptedException {
+			// correlation equation
+			int N = 1210281;// total users count
+			int n = 0;// pair count
+			double numerator1 = 0.0;// sum 'xy'
+			double sum_x = 0.0;// sum 'x'
+			double sum_y = 0.0;// sum 'y'
+			double sum_xx = 0.0;// sum 'x*x'
+			double sum_yy = 0.0;// sum 'y*y'
+			double sum_numerator = 0.0;
+			double sum_denominator = 0.0;
+			double result = 0.0;
+			for (Text val : values){
+				String[] p = val.toString().split("\t");
+				String p0 = p[0];
+				String[] parts = p0.split(" ");
+				double r1 = Double.parseDouble(parts[0]);
+				double r2 = Double.parseDouble(parts[1]);
+				numerator1 += r1 * r2;
+				sum_x += r1;
+				sum_y += r2;
+				sum_xx += Math.pow(r1, 2);
+				sum_yy += Math.pow(r2, 2);
+				n += 1;
+			}
+			if(n > 1){
+				sum_numerator = (n * numerator1) - (sum_x * sum_y);
+				sum_denominator = Math.sqrt(n * sum_xx - Math.pow(sum_x, 2)) * Math.sqrt(n * sum_yy - Math.pow(sum_y, 2));
+				int EPS = 20;
+				double CONF_LEVEL = 1.96;
+				if (sum_denominator  == 0.0){
+					result = 0.0;
+				}else{
+					// confidence interval
+					result = sum_numerator / sum_denominator;
+					if (result > 0.999999999999){
+						result = 0.9999999999;		
+					}else if(result < (-0.9999999999)){
+						result = (-0.9999999999);
+					}
+					double fisher_z = 0.5 * Math.log((1 + result) / (1 - result));
+					double fisher_segma = 1 / (Math.sqrt(n - 3));
+					double z_lower = fisher_z - (fisher_segma * CONF_LEVEL);
+					double z_upper = fisher_z + (fisher_segma * CONF_LEVEL);
+					double inverse_fisher_lower = (Math.exp(2 * z_lower) - 1) / (Math.exp(2 * z_lower) + 1);
+					double inverse_fisher_upper = (Math.exp(2 * z_upper) - 1) / (Math.exp(2 * z_upper) + 1);
+					if ((result >= 0) && (inverse_fisher_lower < 0)){
+						inverse_fisher_lower = 0;
+					}else if ((result <= 0) && (inverse_fisher_lower >0)){
+						inverse_fisher_lower = 0;
+					}
+					if (inverse_fisher_lower * inverse_fisher_upper < 0){
+						inverse_fisher_lower = Math.min(Math.abs(inverse_fisher_lower), Math.abs(inverse_fisher_upper));
+					}else{
+						inverse_fisher_lower = Math.min(inverse_fisher_lower, inverse_fisher_upper);
+					}
+//					double similarity = inverse_fisher_lower * Math.pow((n / (n + EPS)), 2) * (Math.log((double) n) / Math.log((double) N));
+					double similarity = inverse_fisher_lower * Math.pow((n / (n + EPS)), 2) * Math.log((double) n);
+					context.write(new Text(key), new Text(Double.toString(similarity)));
+			
+			}
+					
+			}
+		}
+//		// recommendation system correlation equation
+//				) throws IOException, InterruptedException {
+//			int n = 0;
+//			double denominator1 = 0.0;
+//			double denominator2 = 0.0;
+//			double sum_numerator = 0.0;
+//			double sum_denominator = 0.0;
+//			double result = 0.0;
+//			for (Text val : values){
+//				String[] p = val.toString().split("\t");
+//				String p0 = p[0];// item ratings
+//				String p1 = p[1];// item average ratings
+//				String[] parts = p0.split(" ");
+//				String[] partsAvg = p1.split(" ");
+//				double r1 = Double.parseDouble(parts[0]);
+//				double r2 = Double.parseDouble(parts[1]);
+//				double avg1 = Double.parseDouble(partsAvg[0]);
+//				double avg2 = Double.parseDouble(partsAvg[1]);
+//				double numerator = (r1 - avg1) * (r2 - avg2);
+//				double d1 = Math.pow((r1 - avg1), 2);
+//				double d2 = Math.pow((r2 - avg2), 2);
+//				denominator1 += d1;
+//				denominator2 += d2;
+//				sum_numerator += numerator;	
+//				n += 1;
+//			}
+//			sum_denominator = Math.sqrt(denominator1) * Math.sqrt(denominator2);
+//			if (sum_denominator  == 0.0){
+//				result = 0;
+//			}else{
+//				result = sum_numerator / sum_denominator;// pearson
+//			}
+//			
+//			context.write(new Text(key), new Text(Double.toString(result)));
+//		}
+	}
+	
+// todo
+	public static class SortMapper
+	extends Mapper<Object,// input key
+	Text,  // input value
+	Text,  // output key
+	Text> //output value
+	{
+		public void map(Object key, Text value, Context context)
+				throws IOException, InterruptedException {
+				String[] p = value.toString().split("\t");
+//				System.out.println(p[0]);
+//				System.exit(2);
+				String[] k = p[0].split(" ");
+				String v1 = k[1] + " " + p[1];
+				String v2 = k[0] + " " + p[1];
+				context.write(new Text(k[0]), new Text(v1));		
+				context.write(new Text(k[1]), new Text(v2));
+		}
+	}
+
+	public static class SortReducer
+	extends Reducer<Text,Text,Text,Text> {
+		public void reduce(Text key, Iterable<Text> values,
+				Context context
+				) throws IOException, InterruptedException {
+			// descend sort
+			Map<Double, String> treemap = new TreeMap<>(Collections.reverseOrder());
+			for (Text val : values){
+				// creating tree map				
+				String[] parts = val.toString().split(" ");
+				double s = Double.parseDouble(parts[1]);
+				// populating tree map
+				treemap.put(s, parts[0]);      				
+			}
+			for(Map.Entry<Double, String> entry : treemap.entrySet()) {
+				  double k = entry.getKey();
+				  String v = entry.getValue();
+				  String value = v + " " + Double.toString(k);
+				  context.write(new Text(key), new Text(value));  
+				}
+			
+		}
+	}
+
+	public static void CalAvgDriver(String input, String output) throws IOException, ClassNotFoundException, InterruptedException {
+		Configuration conf = new Configuration();
+		Job job = Job.getInstance(conf);
+		job.setJarByClass(PearsonSimilarity.class);
+		job.setMapperClass(CalAvgMapper.class);
+		job.setReducerClass(CalAvgReducer.class);
+		job.setOutputKeyClass(Text.class);
+		job.setOutputValueClass(Text.class);
+		FileInputFormat.addInputPath(job, new Path(input));
+		FileOutputFormat.setOutputPath(job, new Path(output));
+		job.waitForCompletion(true);
+	}
+	
+	public static void UserDriver(String input, String output) throws IOException, ClassNotFoundException, InterruptedException {
+		Configuration conf = new Configuration();
+		Job job = Job.getInstance(conf);
+		job.setJarByClass(PearsonSimilarity.class);
+		job.setMapperClass(UserMapper.class);
+		job.setReducerClass(UserReducer.class);
+		job.setOutputKeyClass(Text.class);
+		job.setOutputValueClass(Text.class);
+		FileInputFormat.addInputPath(job, new Path(input));
+		FileOutputFormat.setOutputPath(job, new Path(output));
+		job.waitForCompletion(true);
+	}
+	
+	public static void CalPearsonDriver(String input, String output) throws IOException, ClassNotFoundException, InterruptedException {
+		Configuration conf = new Configuration();
+		Job job = Job.getInstance(conf);
+		job.setJarByClass(PearsonSimilarity.class);
+		job.setMapperClass(CalPearsonMapper.class);
+		job.setReducerClass(CalPearsonReducer.class);
+		job.setOutputKeyClass(Text.class);
+		job.setOutputValueClass(Text.class);
+		FileInputFormat.addInputPath(job, new Path(input));
+		FileOutputFormat.setOutputPath(job, new Path(output));
+		job.waitForCompletion(true);
+	}
+	
+	
+	
+	public static void SortDriver(String input, String output) throws IOException, ClassNotFoundException, InterruptedException {
+		Configuration conf = new Configuration();
+		Job job = Job.getInstance(conf);
+		job.setNumReduceTasks(1);
+		job.setJarByClass(PearsonSimilarity.class);
+		job.setMapperClass(SortMapper.class);
+		job.setReducerClass(SortReducer.class);
+		job.setOutputKeyClass(Text.class);
+		job.setOutputValueClass(Text.class);
+		FileInputFormat.addInputPath(job, new Path(input));
+		FileOutputFormat.setOutputPath(job, new Path(output));
+		job.waitForCompletion(true);
+	}
+	
+	public static void main(String[] args) throws Exception {
+		Configuration conf = new Configuration();
+		String[] otherArgs = new GenericOptionsParser(conf, args).getRemainingArgs();
+		if (otherArgs.length != 2) {
+			System.err.println("Usage: pagerank <in> <out>");
+			System.exit(2);
+		}
+		
+		String bucketName = otherArgs[1];
+		String tmpDirName = bucketName + "tmp/";
+		String resultDirName = bucketName + "result/";
+		String CalAvgOutputTemp = tmpDirName + "CalAvgOutput/";
+		String UserOutputTemp = tmpDirName + "UserOutput/";
+		String CalPearsonOutputTemp = tmpDirName + "CalPearsonOutput/";
+		String SortOutputTemp = tmpDirName + "SortOutput/";
+		String CalAvgOutput = resultDirName + "CalAvgOutput.txt";
+		String UserOutput = resultDirName + "UserOutput.txt";
+		String CalPearsonOutput = resultDirName + "CalPearsonOutput.txt";
+		String SortOutput = resultDirName + "SortOutput.txt";
+		
+		FileSystem fs = FileSystem.get(new URI(otherArgs[1]), conf);
+		if (fs.exists(new Path(tmpDirName))){
+			fs.delete(new Path(tmpDirName), true);
+		}
+		
+		if (fs.exists(new Path(resultDirName))){
+			fs.delete(new Path(resultDirName), true);
+		}
+		
+		PearsonSimilarity.CalAvgDriver(otherArgs[0], CalAvgOutputTemp);
+		FileUtil.copyMerge(fs, new Path(CalAvgOutputTemp), fs, new Path(CalAvgOutput), false, conf, "");
+
+		PearsonSimilarity.UserDriver(CalAvgOutput, UserOutputTemp);
+		FileUtil.copyMerge(fs, new Path(UserOutputTemp), fs, new Path(UserOutput), false, conf, "");
+
+//		PearsonSimilarity.CalPearsonDriver(otherArgs[0], CalPearsonOutputTemp);
+		PearsonSimilarity.CalPearsonDriver(UserOutput, CalPearsonOutputTemp);
+		FileUtil.copyMerge(fs, new Path(CalPearsonOutputTemp), fs, new Path(CalPearsonOutput), false, conf, "");
+		
+		PearsonSimilarity.SortDriver(CalPearsonOutput, SortOutputTemp);
+		FileUtil.copyMerge(fs, new Path(SortOutputTemp), fs, new Path(SortOutput), false, conf, "");
+
+	}
+}
+
+
+
+
