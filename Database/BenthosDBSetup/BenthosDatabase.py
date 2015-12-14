@@ -9,9 +9,9 @@ from amazon.api import AmazonAPI
 import os
 
 # Amazon product API Key
-AMAZON_ACCESS_KEY = 'AKIAIYXEGNFLL2JWDBDA'
-AMAZON_SECRET_KEY = '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'
-AMAZON_ASSOC_TAG = 'Benthos-20'
+AMAZON_ACCESS_KEY = ''
+AMAZON_SECRET_KEY = ''
+AMAZON_ASSOC_TAG = ''
 amazon = AmazonAPI(AMAZON_ACCESS_KEY, AMAZON_SECRET_KEY, AMAZON_ASSOC_TAG)
 
 # unzip json file
